@@ -47,8 +47,12 @@ st.markdown("""
 # Initialize session state
 if 'search_history' not in st.session_state:
     st.session_state.search_history = []
+
 if 'responses' not in st.session_state:
     st.session_state.responses = {}
+
+if 'debug_mode' not in st.session_state:
+    st.session_state.debug_mode = False
 
 # Get API keys from Streamlit secrets
 def get_api_keys():
@@ -57,6 +61,12 @@ def get_api_keys():
         'mistral': st.secrets.get('MISTRAL_API_KEY', ''),
         'perplexity': st.secrets.get('PERPLEXITY_API_KEY', ''),
     }
+
+def mask_key(key):
+    """Show first 6 and last 4 chars for debugging without leaking the full key."""
+    if not key or len(key) < 10:
+        return "(empty or too short)"
+    return f"{key[:6]}...{key[-4:]}"
 
 # Claude API call
 def call_claude(query, api_key):
@@ -80,6 +90,8 @@ def call_claude(query, api_key):
         response.raise_for_status()
         result = response.json()
         return result['content'][0]['text']
+    except requests.exceptions.HTTPError as e:
+        return f"❌ Error {e.response.status_code}: {e.response.text}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
@@ -104,6 +116,8 @@ def call_mistral(query, api_key):
         response.raise_for_status()
         result = response.json()
         return result['choices'][0]['message']['content']
+    except requests.exceptions.HTTPError as e:
+        return f"❌ Error {e.response.status_code}: {e.response.text}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
@@ -131,6 +145,8 @@ def call_perplexity(query, api_key):
         response.raise_for_status()
         result = response.json()
         return result['choices'][0]['message']['content']
+    except requests.exceptions.HTTPError as e:
+        return f"❌ Error {e.response.status_code}: {e.response.text}"
     except Exception as e:
         return f"❌ Error: {str(e)}"
 
@@ -141,24 +157,41 @@ st.markdown("---")
 
 # Check API Keys
 api_keys = get_api_keys()
-if not any(api_keys.values()):
-    st.error("⚠️ API keys not configured! Add them to Streamlit secrets.")
-    st.info("""
-    ### How to add API keys:
-    1. Go to your Streamlit Cloud app settings
-    2. Click "Secrets" (🔐)
-    3. Add these:
-    ```
-    CLAUDE_API_KEY = "your-key-here"
-    MISTRAL_API_KEY = "your-key-here"
-    PERPLEXITY_API_KEY = "your-key-here"
-    ```
-    """)
-    st.stop()
 
-# Sidebar
+# Debug panel in sidebar (expandable)
 with st.sidebar:
     st.title("⚙️ Settings")
+    
+    st.subheader("🔐 API Key Status")
+    for name, key in api_keys.items():
+        if key:
+            st.success(f"{name.capitalize()}: key loaded ({mask_key(key)})")
+        else:
+            st.error(f"{name.capitalize()}: key **missing**")
+    
+    st.session_state.debug_mode = st.toggle("Show full debug errors", value=False)
+    
+    st.markdown("---")
+    
+    if not any(api_keys.values()):
+        st.warning("⚠️ API keys not configured!")
+        st.info("""
+        **How to add API keys:**
+        
+        **Option A: Streamlit Cloud**
+        1. Go to your app dashboard → Manage app
+        2. Click **Secrets** (🔐)
+        3. Add:
+        ```toml
+        CLAUDE_API_KEY = "your-key-here"
+        MISTRAL_API_KEY = "your-key-here"
+        PERPLEXITY_API_KEY = "your-key-here"
+        ```
+        
+        **Option B: Local run**
+        Create `.streamlit/secrets.toml` in your project root with the same contents.
+        """)
+        st.stop()
     
     st.subheader("Select AI Models")
     use_claude = st.checkbox("🤖 Claude", value=True, help="Best for reasoning and complex tasks")
@@ -193,7 +226,6 @@ with st.sidebar:
 st.subheader("🔍 Search Multiple AI Models")
 
 col1, col2 = st.columns([3, 1])
-
 with col1:
     query = st.text_area(
         "What would you like to search for?",
@@ -201,7 +233,6 @@ with col1:
         height=100,
         label_visibility="visible"
     )
-
 with col2:
     search_button = st.button("🔍 Search", use_container_width=True, type="primary")
 
